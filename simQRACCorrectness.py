@@ -1,6 +1,7 @@
 import numpy as np
 from collections import Counter
 import math
+from tqdm import tqdm
 import multiprocessing as mp
 from multiprocessing import Pool
 
@@ -135,26 +136,42 @@ class Multinomial:
             else:
                 probVector = [self.q]*desiredIndex + [self.p] + [self.q]*(self.numCats - desiredIndex - 1)
             
-        numSamples = 1
-        samplesRes = {}
+        numSamplesLowerBound = 1
+        numSamplesUpperBound = 10000
+
         while True:
-            successRate = self.simulatedMultinomialSampling(numSamples, probVector, desiredIndex, numTrials=numTrials)
-            samplesRes[numSamples] = successRate
-            if successRate >= q:
-                return samplesRes
-            numSamples += 1
+            successRate = self.simulatedMultinomialSampling(numSamplesUpperBound, probVector, desiredIndex, numTrials=numTrials)
+            if successRate > q:
+                break
+            else:
+                numSamplesLowerBound = numSamplesUpperBound
+                numSamplesUpperBound = numSamplesUpperBound * 2
+
+
+        samplesRes = {}
+        while numSamplesUpperBound != numSamplesLowerBound:
+            # print("lower bound")
+            midPoint = math.ceil((numSamplesLowerBound + numSamplesUpperBound)/2) + 1
+            successRate = self.simulatedMultinomialSampling(midPoint, probVector, desiredIndex, numTrials=numTrials)
+            samplesRes[midPoint] = successRate
+            if successRate < q:
+                numSamplesLowerBound = midPoint
+            else:
+                numSamplesUpperBound = midPoint
+        return samplesRes, midPoint
 
     def minSampleMajorityFinder(self, q, desiredIndex= None, numTrials=100):
     
         pass
 
     def permuter(self, numSamples):
-        from itertools import combinations_with_replacement
+        from itertools import product
         numCats = self.numCats - 1
-        for thing in combinations_with_replacement(range(numCats), numSamples):           
-            yield thing
+        for thing in product(range(numSamples), repeat=numCats):
+            if sum(thing) == numSamples:
+                yield thing
 
-
+    
 
     def computePermCoef(self, permutation, maxCount):
         """
@@ -262,11 +279,12 @@ class Multinomial:
         upperBound = numSamples // 2 + 1
       
         totalProb = 0
-        for m in range(lowerBound, numSamples):
+        for m in tqdm(range(lowerBound, numSamples)):
             if m > upperBound:
                 # accept everything
                 for perm in self.permuter(numSamples - m):
                     logProb = singlePerm(x=perm, n=numSamples-m, m=m, p =p, q=q)
+                    print("log prob: ", logProb, flush=True)
                     totalProb += math.exp(logProb)
             else:
                 for perm in self.permuter(numSamples - m):
@@ -276,7 +294,8 @@ class Multinomial:
                         continue
                     else:
                         logProb = singlePerm(x=perm, n=numSamples-m, m=m, p =p, q=q)
-                        totalProb = math.exp(logProb)
+                        print("logprob ", logProb, flush=True)
+                        totalProb += math.exp(logProb)
         
         return totalProb
     
