@@ -1,6 +1,8 @@
 import numpy as np
 from collections import Counter
 import math
+import multiprocessing as mp
+from multiprocessing import Pool
 
 class Multinomial:
     def __init__(self, p, numCats = None, desiredProb = None):
@@ -43,11 +45,79 @@ class Multinomial:
                 # if two things are unique count
                 max_count = most_common[0][1]
                 second_max_count = most_common[1][1]
-                if most_common[0][0] == desiredIndex and max_count > second_max_count:
+                if most_common[0][0] == desiredIndex and max_count != second_max_count:
                     successCount += 1
                     
         return successCount / numTrials
     
+
+    def simulatedMultinomailMajoritySampling(self, numSamples, probVector, desiredIndex, numTrials=1000):
+        """
+        Monte Carlo simulation for majority sampling
+        """
+        if numSamples % 2 == 0:
+            majority = numSamples // 2 + 1
+        else:
+            majority = (numSamples + 1) // 2
+
+        successes = 0
+        for _ in numTrials:
+            samples = np.random.choice(range(self.numCats), size=numSamples, p=probVector, replace=True)
+            counts = Counter(samples)
+            mostCommon = counts.most_common(1)
+            if mostCommon[0][0] == desiredIndex and mostCommon[0][1] >= majority:
+                successes += 1
+        return successes / numTrials
+    
+
+    def singleTrial(self, probvector, numSamples, desiredIndex, trialIndex = 0):
+        """
+        Perform single monte carlo simulation for a fixed numSamples
+        """
+        if desiredIndex is None:
+            desiredIndex = probvector.index(max(probvector))
+        else:
+            if probvector.index(max(probvector)) != desiredIndex:
+                raise ValueError("the value of the desired index must be the same as the biased prob vector")
+            
+        samples = np.random.choice(range(self.numCats), size=numSamples, p=probvector)
+        counts = Counter(samples)
+        most_common = counts.most_common(2)
+        if len(most_common) < 2:
+            # unique count from the sampler
+            if most_common[0][0] == desiredIndex:
+                return 1
+        else:
+            # if two things are unique count
+            max_count = most_common[0][1]
+            second_max_count = most_common[1][1]
+            if most_common[0][0] == desiredIndex and max_count != second_max_count:
+                return 1
+        return 0
+
+    
+    def trialPermuter(self, numTrials):
+        for i in range(numTrials):
+            yield i
+
+
+
+    def multiprocessingMCPLuralitySim(self, numSamples, probVector, desiredIndex, numPools=5, numTrials=1000):
+        """
+        Monte Carlo method of plurality simulation, multiprocessing
+        """
+        simRes = []
+        from functools import partial
+        parametrizedFunction = partial(self.singleTrial, numSamples = numSamples, desiredIndex=desiredIndex, probVector=probVector)
+        with mp.Pool(processes=numPools) as pool:
+            simRes.append(pool.imap_unordered(parametrizedFunction, self.trialPermuter(numTrials)))
+
+        return sum(simRes) / numTrials
+    
+    def multiprocessingMCMajoritySim(self, numSamples, probVector, desiredIndex, numPools=5, numTrials=1000):
+        """Multiprocessing version of the monte carlo simulation for majority voting"""
+        pass
+
 
     def minSampleFinderSimulation(self, q, desiredIndex = None, numTrials=1000):
         """
@@ -74,45 +144,9 @@ class Multinomial:
                 return samplesRes
             numSamples += 1
 
-        
-    # def minSampleFinder(self, correctnessLevel):
-    #     """
-    #     Find the minimal number of samples to guarantee pluraiklty of the target with a certain confidence level q
-
-    #     """
-
-    #     numCats = self.numCats
-    #     if correctnessLevel <= self.p:
-    #         return 1
-        
-    #     if correctnessLevel > 0.5 and self.p < self.q:
-    #         raise ValueError("Desired confidence level cannot be achieved with given probabilities")
-        
-
-    #     analyticalBound = 0
-    #     numSamples = 2
-
-    #     while analyticalBound < correctnessLevel:
-    #         currentBound = 0
-    #         minPlurality = math.ceil(numSamples / numCats) + 1
-    #         majority = math.ceil(numSamples / 2) + 1
-
-    #         if minPlurality == numSamples:
-    #             currentBound = self.p ** numSamples
-    #             numSamples += 1
-    #             analyticalBound = currentBound
-    #             continue
-
-            
-    #         for number in range(minPlurality, numSamples + 1):
-    #             remainingSamples = numSamples - number
-    #             tempVal = math.factorial(numSamples) / math.factorial(number) * self.p ** number
-    #             maxCount = number - 1
-
-    #         analyticalBound = currentBound
-    #         numSamples += 1
-
-
+    def minSampleMajorityFinder(self, q, desiredIndex= None, numTrials=100):
+    
+        pass
 
     def permuter(self, numSamples):
         from itertools import combinations_with_replacement
@@ -134,7 +168,6 @@ class Multinomial:
         if max(permCount.values()) >= maxCount:
             return 0
         
-
         numCats = self.numCats - 1
 
         finalCounts = 1 
@@ -157,7 +190,7 @@ class Multinomial:
             majority = math.ceil(numSamples / 2)
 
         
-        minPlurality = math.ceil(numSamples / numCats) + 1
+        minPlurality = math.ceil(numSamples // numCats) + 2
 
         totalProb = 0
         for n in range(minPlurality, numSamples):
@@ -210,14 +243,77 @@ class Multinomial:
                         
 
         
-
+    def logProbMltinomial(self, numSamples):
+        """
+        Compute the log probabiliyt of a specific permutation of the pmf
+        Input: Permutation
+        Number of samples, number of pos result
+        """
+        from distributions.helperFunctions.multinomailApprox import singlePerm
+        p = self.p
+        q = self.q
         
 
+        if numSamples % self.numCats == 0:
+            lowerBound = numSamples // self.numCats + 1
+        else:
+            lowerBound = numSamples // self.numCats + 2
 
+        upperBound = numSamples // 2 + 1
+      
+        totalProb = 0
+        for m in range(lowerBound, numSamples):
+            if m > upperBound:
+                # accept everything
+                for perm in self.permuter(numSamples - m):
+                    logProb = singlePerm(x=perm, n=numSamples-m, m=m, p =p, q=q)
+                    totalProb += math.exp(logProb)
+            else:
+                for perm in self.permuter(numSamples - m):
+                    counts = Counter(perm)
+                    highCount = counts.most_common(1)
+                    if highCount[0][1] >= m:
+                        continue
+                    else:
+                        logProb = singlePerm(x=perm, n=numSamples-m, m=m, p =p, q=q)
+                        totalProb = math.exp(logProb)
+        
+        return totalProb
+    
 
+    def findLowerBoundApprox(self, threshold):
+        """
+        Function to find the lowest value for the 
+        
+        """
+        lowerBound = 1
+        upperBound = 10000
 
+        upperBoundFound = False
+        estimateResults = {} 
+        
+        while not upperBoundFound:
+            tempProb = self.logProbMltinomial(upperBound)
+            estimateResults[upperBound] = tempProb
+            if tempProb > threshold:
+                upperBoundFound = True
+            
+            else:
+                lowerBound = upperBound
+                upperBound = upperBound * 2
 
+        
+        midPoint = math.ceil((lowerBound + upperBound) / 2)
 
+        while lowerBound != upperBound:
+            tempProb = self.logProbMltinomial(midPoint)
+            estimateResults[midPoint] = tempProb
+            if tempProb >= threshold:
+                lowerBound = midPoint
+            else:
+                upperBound = midPoint
+
+        return estimateResults, midPoint
 
 
         
