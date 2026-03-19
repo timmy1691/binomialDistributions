@@ -54,7 +54,7 @@ class Multinomial:
 
     def simulatedMultinomailMajoritySampling(self, numSamples, probVector, desiredIndex, numTrials=1000):
         """
-        Monte Carlo simulation for majority sampling
+        Monte Carlo simulation for majority sampling, for results that are strictly greater than half
         """
         if numSamples % 2 == 0:
             majority = numSamples // 2 + 1
@@ -96,12 +96,6 @@ class Multinomial:
                 return 1
         return 0
 
-    
-    def trialPermuter(self, numTrials):
-        for i in range(numTrials):
-            yield i
-
-
 
     def multiprocessingMCPLuralitySim(self, numSamples, probVector, desiredIndex, numPools=5, numTrials=1000):
         """
@@ -115,9 +109,19 @@ class Multinomial:
 
         return sum(simRes) / numTrials
     
-    def multiprocessingMCMajoritySim(self, numSamples, probVector, desiredIndex, numPools=5, numTrials=1000):
-        """Multiprocessing version of the monte carlo simulation for majority voting"""
-        pass
+
+    def singleSampleSimulated(self, numSamples, desiredIndex= None, numTrials=1000):
+        if desiredIndex is None:
+            probVector = [self.p] + [self.q] * (self.numCats - 1)
+            desiredIndex = 0
+        else:
+            if desiredIndex >= self.numCats:
+                raise ValueError("Desired index must be one of the categories")
+            else:
+                probVector = [self.q]*desiredIndex + [self.p] + [self.q]*(self.numCats - desiredIndex - 1)
+
+        prob = self.simulatedMultinomialSampling(numSamples, probVector, desiredIndex, numTrials)
+        return prob
 
 
     def minSampleFinderSimulation(self, q, desiredIndex = None, numTrials=1000):
@@ -159,47 +163,144 @@ class Multinomial:
             else:
                 numSamplesUpperBound = midPoint
         return samplesRes, midPoint
-
-    def minSampleMajorityFinder(self, q, desiredIndex= None, numTrials=100):
     
-        pass
 
-    def permuter(self, numSamples):
+
+    def trialPermuter(self, numTrials):
+        for i in range(numTrials):
+            yield i
+
+
+    def permuter(self, numSamples, maxCount):
+        """
+        The subset needed is defined by maxcount of the bias index
+        numSamples is the total distirbuted samples
+
+        maxCount is the maxCount of the biased index
+        numSamples is the number of samples in total to be distributed
+        """
+        from itertools import product
+        numCats = self.numCats - 1
+        minConsideredValues = min(numSamples, maxCount)
+        for thing in product(range(minConsideredValues), repeat=numCats):
+            if sum(thing) == numSamples:
+                yield thing
+
+    def noGuardPermuter(self, numSamples):
+
         from itertools import product
         numCats = self.numCats - 1
         for thing in product(range(numSamples), repeat=numCats):
             if sum(thing) == numSamples:
                 yield thing
 
+    def computeRamanApproxSinglePermExp(self, permutation):
+        """
+        compute producte of fatcorials using ramanujan approx
+
+        compute log(prod(xi!)) = (-1) sum(log(x!))
+        """
+        from distributions.helperFunctions.multinomailApprox import ramanujanApproxNumpy
+
+        loggedVals = ramanujanApproxNumpy(permutation)
+        summedVals = loggedVals.sum()
+        return math.exp(-summedVals)
     
-
-    def computePermCoef(self, permutation, maxCount):
+    def computeRamanApproxSinglePerm(self, permutation):
         """
-        Permutation input will be a counter
-        if maxCoun
+        compute producte of fatcorials using ramanujan approx
+
+        compute log(prod(xi!)) = (-1) sum(log(x!))
         """
+        from distributions.helperFunctions.multinomailApprox import ramanujanApproxNumpy
 
-        from collections import Counter
-        permCount = Counter(permutation)
+        loggedVals = ramanujanApproxNumpy(permutation)
+        summedVals = loggedVals.sum()
+        return -summedVals
+    
+    def computeStirlingApproxSinglePerm(self, permutation):
+        """
+        Compute the coefficient using stirlings approximation
+        """
+        from distributions.helperFunctions.multinomailApprox import stirlingApproxNumpy
 
-        if max(permCount.values()) >= maxCount:
-            return 0
+        loggedVals = stirlingApproxNumpy(permutation)
+        summedVals = loggedVals.sum()
+        return -summedVals
+
+
+    def computePermExpCoef(self, numSamples, maxCount, approxMethod="ramanujan"):
+        """
+        Compute the product of the factorials of all permutations compute using log and exp at the end for a fixed value of m
+        Compute the log prob and sum for each element in the subset of X = {maj(x)= x_bias}
         
-        numCats = self.numCats - 1
+        return the exponented value as the logprob is calculated, so retrieve the real prob value
 
-        finalCounts = 1 
-        for val in permutation:
-            finalCounts *= math.factorial(permutation[val])
+        """        
+        from distributions.helperFunctions.multinomailApprox import ramanujanApprox2, stirlingApprox2
+
+        p = self.p
+        q = self.q
+
+        if approxMethod == "ramanujan":
+            fullCoefficient = ramanujanApprox2(numSamples) - ramanujanApprox2(maxCount)  +  maxCount*math.log(p)  + (numSamples - maxCount)*math.log(q)
+        else:
+            fullCoefficient = stirlingApprox2(numSamples) - stirlingApprox2(maxCount) + maxCount*math.log(p) + (numSamples - maxCount)*math.log(q)
+        
+        remainderCoef = 0
+
+        for perm in self.permuter(numSamples-maxCount, maxCount):
+            if approxMethod == "ramanujan":
+                tempRes = self.computeRamanApproxSinglePerm(np.array(perm))
+                remainderCoef += tempRes
+                # print("remainder coef", remainderCoef, flush=True)
+            else:
+                tempRes = self.computeStirlingApproxSinglePerm(np.array(perm))
+                remainderCoef += tempRes
+
+            # print("permutation ", perm)
+            # print("coefficient ", 1/math.exp(tempRes))
+            # break
+
+        return math.exp(fullCoefficient + remainderCoef)
     
-        return 1/ finalCounts
+    def computePermCoef(self, numSamples, maxCount, approxMethod="ramanujan"):
+        """
+        Compute the product of the factorials of all permutations compute using log and exp at the end for a fixed value of m
+
+        return the logprob
+        """        
+        from distributions.helperFunctions.multinomailApprox import ramanujanApprox2, stirlingApprox2
+
+        p = self.p
+        q = self.q
+
+        if approxMethod == "ramanujan":
+            fullCoefficient = ramanujanApprox2(numSamples) - ramanujanApprox2(maxCount)  +  maxCount*math.log(p)  + (numSamples - maxCount)*math.log(q)
+        else:
+            fullCoefficient = stirlingApprox2(numSamples) - stirlingApprox2(maxCount) + maxCount*math.log(p) + (numSamples - maxCount)*math.log(q)
+        
+        remainderCoef = 0
+
+        for perm in self.permuter(numSamples-maxCount, maxCount):
+            if approxMethod == "ramanujan":
+                tempRes = self.computeRamanApproxSinglePerm(np.array(perm))
+                remainderCoef += tempRes
+            else:
+                tempRes = self.computeStirlingApproxSinglePerm(np.array(perm))
+                remainderCoef += tempRes
+
+        return fullCoefficient + remainderCoef
 
 
-    def probCalculator(self, numSamples):
+    def probCalculator(self, numSamples, approxMethod="ramanujan"):
         """
         Probability of getting a plurality vote 
         Brute force go through all probabilities for a single number of samples, and the success probability fixed
         """
+        from tqdm import tqdm
         numCats = self.numCats
+        
         
         if numSamples % 2 == 0:
             majority = numSamples // 2 + 1
@@ -209,31 +310,110 @@ class Multinomial:
         
         minPlurality = math.ceil(numSamples // numCats) + 2
 
+
         totalProb = 0
-        for n in range(minPlurality, numSamples):
-            if n > majority:
-                intCoef = (math.factorial(numSamples) / math.factorial(n))
-                tempCoef = self.p**(n) * self.q**(numSamples - n)
-
-                permutationCoef = 0
-                for perm in self.permuter(numSamples - n):
-                    permutationCoef += self.computePermCoef(perm, n)
-
-
-                intCoef = intCoef*permutationCoef
-                totalProb += intCoef*tempCoef
-
+        
+        for mCount in tqdm(range(minPlurality, numSamples)):
+            tempRes = self.computePermExpCoef(numSamples, mCount, approxMethod=approxMethod)
+            # print("temp result", tempRes, flush=True)
+            totalProb += tempRes
+            # print("total probability", totalProb, flush=True)
+            # break
         return totalProb
     
+    def logProbCalculator(self, numSamples, approxMethod="ramanujan"):
+        """
+        Calculate the approx sum of probabialites using the logexpsum of the log probabilites
+        """
+        numCats = self.numCats
+        if numSamples % numCats == 0:
+            minPlurality = math.ceil(numSamples // numCats) + 1
+        else:
+            minPlurality = math.ceil(numSamples//numCats) + 2
 
-    def minSampleCalculator(self, q):
+        logProbs = []
+        for mCount in tqdm(range(minPlurality, numSamples)):
+            tempRes = self.computePermExpCoef(numSamples, mCount, approxMethod=approxMethod)
+            logProbs.append(tempRes)
+
+        totalapproxProb = self.computeLogSumApprox(np.array(logProbs))
+        return totalapproxProb
+    
+    def minSampleLogProbCalculator(self, q, startIndex=None, approxMethod="ramanujan"):
+        """
+        Compute the probability approximation using approximate logprob and approximate sum of logprob
+
+        """
+
+        if self.p > q:
+            return 1
+        
+        if startIndex is None:
+            currentSampleNumber = 3
+        else:
+            if isinstance(startIndex, int):
+                if startIndex > 0:
+                    currentSampleNumber = startIndex
+                else:
+                    raise ValueError("numSamples needs to be positive")
+            else:
+                raise TypeError("numSamples needs to be an integer")
+            
+        allSamples= {}
+        while True:
+            tempProb = self.logProbCalculator(currentSampleNumber, approxMethod=approxMethod)
+            # print("current Probability currentSampleNumber", tempProb, flush=True)
+            allSamples[currentSampleNumber] = tempProb
+            if tempProb > q:
+                break
+
+            currentSampleNumber += 1
+
+        
+        return allSamples , currentSampleNumber
+
+    
+    def minSampleCalculator(self, q, startIndex = None, approxMethod="stirling"):
+        """
+        naive calculator for the minimum number of samples
+        Input: a probability q
+
+        Returns the collection of the number of samples, and the lower for required prob value
+        """
+
+        if startIndex is None:
+            currentSampleNumber = 3
+        else:
+            if isinstance(startIndex, int):
+                if startIndex > 0:
+                    currentSampleNumber = startIndex
+                else:
+                    raise ValueError("numSamples needs to be positive")
+            else:
+                raise TypeError("numSamples needs to be an integer")
+
+        allSamples= {}
+        while True:
+            tempProb = self.probCalculator(currentSampleNumber, approxMethod=approxMethod)
+            # print("current Probability currentSampleNumber", tempProb, flush=True)
+            allSamples[currentSampleNumber] = tempProb
+            if tempProb > q:
+                break
+
+            currentSampleNumber += 1
+
+        
+        return allSamples , currentSampleNumber
+
+
+
+    def minSampleCalculatorBin(self, q):
         """
         Find the min samples necesary for a plularity level of q
+        Search through binary search    
         Inopuyt q
         """
 
-        bigNumber = 10**6
-        
         while True:
             tempUpperBound = self.probCalculator(bigNumber)
             if tempUpperBound > q:
@@ -270,7 +450,6 @@ class Multinomial:
         p = self.p
         q = self.q
         
-
         if numSamples % self.numCats == 0:
             lowerBound = numSamples // self.numCats + 1
         else:
@@ -299,6 +478,30 @@ class Multinomial:
         
         return totalProb
     
+    def computeLogSumApprox(self, logProbs):
+        """
+        Compute the approx logsum probability using the approximation 
+
+        sum(pi) = sum(exp(log(pi))) approx exp(m + log(sum(exp(li-m)))
+        """
+
+        m = max(logProbs)
+        interExp = math.log(sum(np.exp(logProbs - m)))
+        return math.exp(m + interExp)
+
+
+    def computeSanavApprox(self, perm, numSamples, maxCount):
+        p = self.p
+        q = self.q
+        pHat = perm/numSamples
+        pBias = maxCount/numSamples
+
+        tempQ = (pHat - q)**2 / q
+        tempP = (pBias - p)**2 / p 
+
+        return -numSamples/2 *(tempQ + tempP)
+
+
 
     def findLowerBoundApprox(self, threshold):
         """

@@ -64,38 +64,48 @@ class Binomial:
         Message Correctness is given by receiving each block correctly.
         This means given a confideence in the message, one takes the nth root for n samples to get the confidence in each block.
         """
-        if self.probBlock is None:
+
+        if self.desiredProb == 0:
+            self.probBlock = 0
+            return 0 
+        
+        if self.desiredProb == 1:
+            self.probBlock = 1
+            return 1
+
+        if self.desiredProb < 0 or self.desiredProb > 1:
+            raise ValueError("probability value must be between 0 and 1")
+        else:
+
             confidence = self.desiredProb
             numSamples = self.numSamples
             self.probBlock = confidence**(1/numSamples)
             return self.probBlock
-
-    
-    def reverseBinomial(self):
-        """
-        Given a fixed sample, find the minimum probability to achieve confidence level q
-        """
-        q = self.desiredProb
-        n = self.numSamples
-
-        if n == 1:
-            return q
         
 
-        if q > 0.5:
-            lowerP = 0.5
-            upperP = 1.0
-            while upperP - lowerP > 1e-6:
-                midP = (lowerP + upperP) / 2
-                if self.binomialProb(midP) <= q:
-                    lowerP = midP
-                else:
-                    upperP = midP
+    def analyticalMessageCorrectness(self):
+        """
+        Compute the probability using log prob rather than taking the power
+        """
+        if self.desiredProb == 0:
+            self.probBlock = 0
+            return 0 
+        
+        if self.desiredProb == 1:
+            self.probBlock = 1
+            return 1
 
-        self.probBlock = midP    
+        if self.desiredProb < 0 or self.desiredProb > 1:
+            raise ValueError("probability value must be between 0 and 1")
+        else:
 
-        return midP
-
+            confidence = self.desiredProb
+            numSamples = self.numSamples
+            self.probBlock = math.exp(math.log(confidence)/numSamples)
+            return self.probBlock
+        
+        
+            
 
     def naiveMinSamples(self, q):
         """
