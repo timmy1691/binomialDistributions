@@ -124,12 +124,47 @@ class Multinomial:
         return prob
 
 
-    def minSampleFinderSimulation(self, q, desiredIndex = None, numTrials=1000):
+    def minSampleFinderSimulationLinear(self, q, desiredIndex= None, startSample=None, numTrials=1000):
+        """
+        Perform the sampling with linear indcreasing numOfSamples
+        
+        """
+        if desiredIndex is None:
+            probVector = [self.p] + [self.q] * (self.numCats - 1)
+            desiredIndex = 0
+        else:
+            if desiredIndex >= self.numCats:
+                raise ValueError("Desired index must be one of the categories")
+            else:
+                probVector = [self.q]*desiredIndex + [self.p] + [self.q]*(self.numCats - desiredIndex - 1)
+
+
+        if startSample is None:
+            numSamples = 3
+        else:
+            if isinstance(startSample, int):
+                numSamples = startSample
+            else:
+                raise ValueError("sample number must be positive integer")
+            
+        allSampleProbs = {}
+        while True:
+            tempProb = self.simulatedMultinomialSampling(numSamples=numSamples, probVector= probVector, desiredIndex=desiredIndex, numTrials=numTrials)
+            allSampleProbs[numSamples] = tempProb
+            if tempProb > q:
+                break
+            numSamples += 1
+        
+        return allSampleProbs, numSamples
+
+
+    def minSampleFinderSimulationBinSearch(self, q, desiredIndex = None, numTrials=1000):
         """
         Simulated method of finding minimum number of samples to achieve confidence level q
 
         brute force find the emperical sample size
         """
+            
 
         if desiredIndex is None:
             probVector = [self.p] + [self.q] * (self.numCats - 1)
@@ -315,7 +350,7 @@ class Multinomial:
         
         for mCount in tqdm(range(minPlurality, numSamples)):
             tempRes = self.computePermExpCoef(numSamples, mCount, approxMethod=approxMethod)
-            # print("temp result", tempRes, flush=True)
+            print("probability of current iteration of m", tempRes, flush=True)
             totalProb += tempRes
             # print("total probability", totalProb, flush=True)
             # break
@@ -333,7 +368,7 @@ class Multinomial:
 
         logProbs = []
         for mCount in tqdm(range(minPlurality, numSamples)):
-            tempRes = self.computePermExpCoef(numSamples, mCount, approxMethod=approxMethod)
+            tempRes = self.computePermCoef(numSamples, mCount, approxMethod=approxMethod)
             logProbs.append(tempRes)
 
         totalapproxProb = self.computeLogSumApprox(np.array(logProbs))
@@ -362,7 +397,7 @@ class Multinomial:
         allSamples= {}
         while True:
             tempProb = self.logProbCalculator(currentSampleNumber, approxMethod=approxMethod)
-            # print("current Probability currentSampleNumber", tempProb, flush=True)
+            print("current Probability currentSampleNumber", tempProb, flush=True)
             allSamples[currentSampleNumber] = tempProb
             if tempProb > q:
                 break
@@ -395,7 +430,7 @@ class Multinomial:
         allSamples= {}
         while True:
             tempProb = self.probCalculator(currentSampleNumber, approxMethod=approxMethod)
-            # print("current Probability currentSampleNumber", tempProb, flush=True)
+            print("current Probability currentSampleNumber", tempProb, flush=True)
             allSamples[currentSampleNumber] = tempProb
             if tempProb > q:
                 break
